@@ -78,6 +78,7 @@ type Session struct {
 	SendCounter       int
 	LastUpdate        int
 	ReceiveCounter    int
+	Change			  bool
 }
 
 // Message represents a message as sent over an untrusted network.
@@ -108,8 +109,9 @@ func (c *Chatter) InitiateHandshake(partnerIdentity *PublicKey) (*PublicKey, err
 		MyDHRatchet: 	 pair,
 		CachedReceiveKeys: make(map[int]*SymmetricKey),
 		SendCounter:       0,
-		LastUpdate:        1,
+		LastUpdate:        0,
 		ReceiveCounter:    0,
+		Change: 		  false,
 	}
 
 	return &pair.PublicKey, nil
@@ -137,6 +139,7 @@ func (c *Chatter) ReturnHandshake(partnerIdentity,
 		SendCounter:       0,
 		LastUpdate:        0,
 		ReceiveCounter:    0,
+		Change: 		  true,
 	}
 
 	return &pair.PublicKey, root.DeriveKey(HANDSHAKE_CHECK_LABEL), nil
@@ -173,14 +176,14 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 		return nil, errors.New("Can't send message to partner with no open session")
 	}
 
-	if c.Sessions[*partnerIdentity].LastUpdate==0{
+	if c.Sessions[*partnerIdentity].Change{
 	newKeys:=GenerateKeyPair()
 	c.Sessions[*partnerIdentity].MyDHRatchet=newKeys
 	root:=c.Sessions[*partnerIdentity].RootChain.DeriveKey(ROOT_LABEL)
 	c.Sessions[*partnerIdentity].RootChain=CombineKeys(root,DHCombine(c.Sessions[*partnerIdentity].PartnerDHRatchet,&newKeys.PrivateKey))
 	c.Sessions[*partnerIdentity].SendChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
 	c.Sessions[*partnerIdentity].ReceiveChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
-	c.Sessions[*partnerIdentity].LastUpdate=1
+	c.Sessions[*partnerIdentity].Change=false
 	c.Sessions[*partnerIdentity].SendCounter=0
 	c.Sessions[*partnerIdentity].ReceiveCounter=0
 	}
@@ -221,12 +224,12 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 		return "", errors.New("Can't receive message from partner with no open session")
 	}
 
-	if message.LastUpdate==1 && c.Sessions[*message.Sender].LastUpdate!=0{
+	if !c.Sessions[*message.Sender].Change{
 		root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
 		c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
 		c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
 		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].RootChain.DeriveKey(CHAIN_LABEL)
-		c.Sessions[*message.Sender].LastUpdate=0
+		c.Sessions[*message.Sender].Change=true
 		c.Sessions[*message.Sender].ReceiveCounter=0
 	}
 
