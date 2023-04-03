@@ -39,7 +39,7 @@ import (
 	//	"bytes" //un-comment for helpers like bytes.equal
 	"encoding/binary"
 	"errors"
-	//	"fmt" //un-comment if you want to do any debug printing.
+	// "fmt" //un-comment if you want to do any debug printing.
 )
 
 // Labels for key derivation
@@ -144,6 +144,26 @@ func (c *Chatter) ReturnHandshake(partnerIdentity,
 
 }
 
+// FinalizeHandshake lets the initiator receive the responder's ephemeral key
+// and finalize the handshake.The partner which calls this method is the initiator.
+func (c *Chatter) FinalizeHandshake(partnerIdentity,
+	partnerEphemeral *PublicKey) (*SymmetricKey, error) {
+
+	if _, exists := c.Sessions[*partnerIdentity]; !exists {
+		return nil, errors.New("Can't finalize session, not yet open")
+	}
+
+	session := c.Sessions[*partnerIdentity]
+
+	root:=CombineKeys(DHCombine(partnerEphemeral,&c.Identity.PrivateKey),DHCombine(partnerIdentity,&session.MyDHRatchet.PrivateKey),DHCombine(partnerEphemeral,&session.MyDHRatchet.PrivateKey))
+
+	session.RootChain = root
+	session.SendChain = root.DeriveKey(CHAIN_LABEL)
+	session.ReceiveChain = root.DeriveKey(CHAIN_LABEL)
+
+	return root.DeriveKey(HANDSHAKE_CHECK_LABEL), nil
+}
+
 // EncodeAdditionalData encodes all of the non-ciphertext fields of a message
 // into a single byte array, suitable for use as additional authenticated data
 // in an AEAD scheme. You should not need to modify this code.
@@ -189,20 +209,6 @@ func (c *Chatter) EndSession(partnerIdentity *PublicKey) error {
 	// TODO: your code here to zeroize remaining state
 
 	return nil
-}
-
-// FinalizeHandshake lets the initiator receive the responder's ephemeral key
-// and finalize the handshake.The partner which calls this method is the initiator.
-func (c *Chatter) FinalizeHandshake(partnerIdentity,
-	partnerEphemeral *PublicKey) (*SymmetricKey, error) {
-
-	if _, exists := c.Sessions[*partnerIdentity]; !exists {
-		return nil, errors.New("Can't finalize session, not yet open")
-	}
-
-	// TODO: your code here
-
-	return nil, errors.New("Not implemented")
 }
 
 // SendMessage is used to send the given plaintext string as a message.
