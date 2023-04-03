@@ -106,10 +106,9 @@ func (c *Chatter) InitiateHandshake(partnerIdentity *PublicKey) (*PublicKey, err
 
 	c.Sessions[*partnerIdentity] = &Session{
 		MyDHRatchet: 	 pair,
-		PartnerDHRatchet: partnerIdentity,
 		CachedReceiveKeys: make(map[int]*SymmetricKey),
 		SendCounter:       0,
-		LastUpdate:        0,
+		LastUpdate:        1,
 		ReceiveCounter:    0,
 	}
 
@@ -130,7 +129,7 @@ func (c *Chatter) ReturnHandshake(partnerIdentity,
 
 	c.Sessions[*partnerIdentity] = &Session{
 		MyDHRatchet:       pair,
-		PartnerDHRatchet:  partnerIdentity,
+		PartnerDHRatchet:  partnerEphemeral,
 		RootChain:         root,
 		SendChain:         root.DeriveKey(CHAIN_LABEL),
 		ReceiveChain:      root.DeriveKey(CHAIN_LABEL),
@@ -160,6 +159,7 @@ func (c *Chatter) FinalizeHandshake(partnerIdentity,
 	session.RootChain = root
 	session.SendChain = root.DeriveKey(CHAIN_LABEL)
 	session.ReceiveChain = root.DeriveKey(CHAIN_LABEL)
+	session.PartnerDHRatchet = partnerEphemeral
 
 	return root.DeriveKey(HANDSHAKE_CHECK_LABEL), nil
 }
@@ -173,30 +173,41 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 		return nil, errors.New("Can't send message to partner with no open session")
 	}
 
+	if c.Sessions[*partnerIdentity].LastUpdate==0{
+	newKeys:=GenerateKeyPair()
+	c.Sessions[*partnerIdentity].MyDHRatchet=newKeys
+	root:=c.Sessions[*partnerIdentity].RootChain.DeriveKey(ROOT_LABEL)
+	c.Sessions[*partnerIdentity].RootChain=CombineKeys(root,DHCombine(c.Sessions[*partnerIdentity].PartnerDHRatchet,&newKeys.PrivateKey))
+	c.Sessions[*partnerIdentity].SendChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
+	c.Sessions[*partnerIdentity].ReceiveChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
+	c.Sessions[*partnerIdentity].LastUpdate=1
+	c.Sessions[*partnerIdentity].SendCounter=0
+	c.Sessions[*partnerIdentity].ReceiveCounter=0
+	}
+
 	c.Sessions[*partnerIdentity].SendCounter++
+
 	chain:=c.Sessions[*partnerIdentity].SendChain
-	c.Sessions[*partnerIdentity].SendChain=chain.DeriveKey(CHAIN_LABEL)
 	key:=chain.DeriveKey(KEY_LABEL)
 	IV:=NewIV()
-	newKeys:=GenerateKeyPair()
+
+
+	c.Sessions[*partnerIdentity].SendChain=chain.DeriveKey(CHAIN_LABEL)
+
+
 
 
 	message := &Message{
 		Sender:   &c.Identity.PublicKey,
 		Receiver: partnerIdentity,
-		NextDHRatchet: &newKeys.PublicKey,
 		Counter: c.Sessions[*partnerIdentity].SendCounter,
+		NextDHRatchet: &c.Sessions[*partnerIdentity].MyDHRatchet.PublicKey,
 		LastUpdate: c.Sessions[*partnerIdentity].LastUpdate,
 	}
 
 	data:=message.EncodeAdditionalData()
-
 	message.Ciphertext=key.AuthenticatedEncrypt(plaintext,data,IV)
 	message.IV=IV
-
-	c.Sessions[*partnerIdentity].MyDHRatchet=newKeys
-	root:=c.Sessions[*partnerIdentity].RootChain.DeriveKey(ROOT_LABEL)
-	c.Sessions[*partnerIdentity].RootChain=CombineKeys(root,DHCombine(partnerIdentity,&newKeys.PrivateKey))
 
 	return message, nil
 }
@@ -208,6 +219,15 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 
 	if _, exists := c.Sessions[*message.Sender]; !exists {
 		return "", errors.New("Can't receive message from partner with no open session")
+	}
+
+	if message.LastUpdate==1 && c.Sessions[*message.Sender].LastUpdate!=0{
+		root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
+		c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
+		c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
+		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].RootChain.DeriveKey(CHAIN_LABEL)
+		c.Sessions[*message.Sender].LastUpdate=0
+		c.Sessions[*message.Sender].ReceiveCounter=0
 	}
 
 	session:=c.Sessions[*message.Sender]
