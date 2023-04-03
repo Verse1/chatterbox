@@ -178,11 +178,13 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	c.Sessions[*partnerIdentity].SendChain=chain.DeriveKey(CHAIN_LABEL)
 	key:=chain.DeriveKey(KEY_LABEL)
 	IV:=NewIV()
+	newKeys:=GenerateKeyPair()
+
 
 	message := &Message{
 		Sender:   &c.Identity.PublicKey,
 		Receiver: partnerIdentity,
-		NextDHRatchet: &c.Sessions[*partnerIdentity].MyDHRatchet.PublicKey,
+		NextDHRatchet: &newKeys.PublicKey,
 		Counter: c.Sessions[*partnerIdentity].SendCounter,
 		LastUpdate: c.Sessions[*partnerIdentity].LastUpdate,
 	}
@@ -191,6 +193,10 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 
 	message.Ciphertext=key.AuthenticatedEncrypt(plaintext,data,IV)
 	message.IV=IV
+
+	c.Sessions[*partnerIdentity].MyDHRatchet=newKeys
+	root:=c.Sessions[*partnerIdentity].RootChain.DeriveKey(ROOT_LABEL)
+	c.Sessions[*partnerIdentity].RootChain=CombineKeys(root,DHCombine(partnerIdentity,&newKeys.PrivateKey))
 
 	return message, nil
 }
