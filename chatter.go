@@ -195,6 +195,37 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	return message, nil
 }
 
+// ReceiveMessage is used to receive the given message and return the correct
+// plaintext. This method is where most of the key derivation, ratcheting
+// and out-of-order message handling logic happens.
+func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
+
+	if _, exists := c.Sessions[*message.Sender]; !exists {
+		return "", errors.New("Can't receive message from partner with no open session")
+	}
+
+	session:=c.Sessions[*message.Sender]
+
+	session.ReceiveCounter++
+
+	if message.Counter>session.ReceiveCounter {
+		session.CachedReceiveKeys[message.Counter]=session.ReceiveChain.DeriveKey(KEY_LABEL)
+		return "", errors.New("Message out of order")
+	}
+
+	if message.Counter==session.ReceiveCounter {
+		key:=session.ReceiveChain.DeriveKey(KEY_LABEL)
+		session.ReceiveChain=session.ReceiveChain.DeriveKey(CHAIN_LABEL)
+		data:=message.EncodeAdditionalData()
+		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
+		return plaintext, nil
+	}
+
+
+
+	return "", errors.New("Not implemented")
+}
+
 // EncodeAdditionalData encodes all of the non-ciphertext fields of a message
 // into a single byte array, suitable for use as additional authenticated data
 // in an AEAD scheme. You should not need to modify this code.
@@ -240,18 +271,4 @@ func (c *Chatter) EndSession(partnerIdentity *PublicKey) error {
 	// TODO: your code here to zeroize remaining state
 
 	return nil
-}
-
-// ReceiveMessage is used to receive the given message and return the correct
-// plaintext. This method is where most of the key derivation, ratcheting
-// and out-of-order message handling logic happens.
-func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
-
-	if _, exists := c.Sessions[*message.Sender]; !exists {
-		return "", errors.New("Can't receive message from partner with no open session")
-	}
-
-	// TODO: your code here
-
-	return "", errors.New("Not implemented")
 }
