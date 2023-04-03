@@ -176,6 +176,8 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 		return nil, errors.New("Can't send message to partner with no open session")
 	}
 
+	c.Sessions[*partnerIdentity].SendCounter++
+
 	if c.Sessions[*partnerIdentity].Change{
 	newKeys:=GenerateKeyPair()
 	c.Sessions[*partnerIdentity].MyDHRatchet=newKeys
@@ -187,7 +189,6 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	c.Sessions[*partnerIdentity].Change=false
 	}
 
-	c.Sessions[*partnerIdentity].SendCounter++
 
 	chain:=c.Sessions[*partnerIdentity].SendChain
 	key:=chain.DeriveKey(KEY_LABEL)
