@@ -103,30 +103,17 @@ func (c *Chatter) InitiateHandshake(partnerIdentity *PublicKey) (*PublicKey, err
 	}
 
 	pair:=GenerateKeyPair()
-	pair2:=GenerateKeyPair()
-	root:=CombineKeys(DHCombine(partnerIdentity,&pair2.PrivateKey),DHCombine(&pair.PublicKey,&c.Identity.PrivateKey),DHCombine(&pair.PublicKey,&pair2.PrivateKey))
-	// g^A=partnerIdentity
-	// g^a=pair.PublicKey
-	// g^B=c.Identity.PublicKey
-	// g^b=pair2.PublicKey
-
 
 	c.Sessions[*partnerIdentity] = &Session{
 		MyDHRatchet: 	 pair,
 		PartnerDHRatchet: partnerIdentity,
-		RootChain: 		 root,
-		SendChain: 		 root.DeriveKey(CHAIN_LABEL),
-		ReceiveChain: 	 root.DeriveKey(CHAIN_LABEL),
 		CachedReceiveKeys: make(map[int]*SymmetricKey),
-		SendCounter: 	 0,
-		LastUpdate: 	 0,
-		ReceiveCounter:  0,
+		SendCounter:       0,
+		LastUpdate:        0,
+		ReceiveCounter:    0,
 	}
 
-	// TODO: your code here
 	return &pair.PublicKey, nil
-
-	// return nil, errors.New("Not implemented")
 }
 
 // ReturnHandshake prepares the second message sent in a handshake, containing
