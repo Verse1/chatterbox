@@ -128,6 +128,35 @@ func (c *Chatter) InitiateHandshake(partnerIdentity *PublicKey) (*PublicKey, err
 
 	// return nil, errors.New("Not implemented")
 }
+
+// ReturnHandshake prepares the second message sent in a handshake, containing
+// an ephemeral DH share. The partner which calls this method is the responder.
+func (c *Chatter) ReturnHandshake(partnerIdentity,
+	partnerEphemeral *PublicKey) (*PublicKey, *SymmetricKey, error) {
+
+	if _, exists := c.Sessions[*partnerIdentity]; exists {
+		return nil, nil, errors.New("Already have session open")
+	}
+
+	pair:=GenerateKeyPair()
+	root:=CombineKeys(DHCombine(partnerIdentity,&pair.PrivateKey),DHCombine(partnerEphemeral,&c.Identity.PrivateKey),DHCombine(partnerEphemeral,&pair.PrivateKey))
+
+	c.Sessions[*partnerIdentity] = &Session{
+		MyDHRatchet:       pair,
+		PartnerDHRatchet:  partnerIdentity,
+		RootChain:         root,
+		SendChain:         root.DeriveKey(CHAIN_LABEL),
+		ReceiveChain:      root.DeriveKey(CHAIN_LABEL),
+		CachedReceiveKeys: make(map[int]*SymmetricKey),
+		SendCounter:       0,
+		LastUpdate:        0,
+		ReceiveCounter:    0,
+	}
+
+	return &pair.PublicKey, root.DeriveKey(HANDSHAKE_CHECK_LABEL), nil
+
+}
+
 // EncodeAdditionalData encodes all of the non-ciphertext fields of a message
 // into a single byte array, suitable for use as additional authenticated data
 // in an AEAD scheme. You should not need to modify this code.
@@ -173,25 +202,6 @@ func (c *Chatter) EndSession(partnerIdentity *PublicKey) error {
 	// TODO: your code here to zeroize remaining state
 
 	return nil
-}
-
-// ReturnHandshake prepares the second message sent in a handshake, containing
-// an ephemeral DH share. The partner which calls this method is the responder.
-func (c *Chatter) ReturnHandshake(partnerIdentity,
-	partnerEphemeral *PublicKey) (*PublicKey, *SymmetricKey, error) {
-
-	if _, exists := c.Sessions[*partnerIdentity]; exists {
-		return nil, nil, errors.New("Already have session open")
-	}
-
-	c.Sessions[*partnerIdentity] = &Session{
-		CachedReceiveKeys: make(map[int]*SymmetricKey),
-		// TODO: your code here
-	}
-
-	// TODO: your code here
-
-	return nil, nil, errors.New("Not implemented")
 }
 
 // FinalizeHandshake lets the initiator receive the responder's ephemeral key
