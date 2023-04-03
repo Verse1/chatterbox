@@ -164,6 +164,37 @@ func (c *Chatter) FinalizeHandshake(partnerIdentity,
 	return root.DeriveKey(HANDSHAKE_CHECK_LABEL), nil
 }
 
+// SendMessage is used to send the given plaintext string as a message.
+// You'll need to implement the code to ratchet, derive keys and encrypt this message.
+func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
+	plaintext string) (*Message, error) {
+
+	if _, exists := c.Sessions[*partnerIdentity]; !exists {
+		return nil, errors.New("Can't send message to partner with no open session")
+	}
+
+	c.Sessions[*partnerIdentity].SendCounter++
+	chain:=c.Sessions[*partnerIdentity].SendChain
+	c.Sessions[*partnerIdentity].SendChain=chain.DeriveKey(CHAIN_LABEL)
+	key:=chain.DeriveKey(KEY_LABEL)
+	IV:=NewIV()
+
+	message := &Message{
+		Sender:   &c.Identity.PublicKey,
+		Receiver: partnerIdentity,
+		NextDHRatchet: &c.Sessions[*partnerIdentity].MyDHRatchet.PublicKey,
+		Counter: c.Sessions[*partnerIdentity].SendCounter,
+		LastUpdate: c.Sessions[*partnerIdentity].LastUpdate,
+	}
+
+	data:=message.EncodeAdditionalData()
+
+	message.Ciphertext=key.AuthenticatedEncrypt(plaintext,data,IV)
+	message.IV=IV
+
+	return message, nil
+}
+
 // EncodeAdditionalData encodes all of the non-ciphertext fields of a message
 // into a single byte array, suitable for use as additional authenticated data
 // in an AEAD scheme. You should not need to modify this code.
@@ -209,26 +240,6 @@ func (c *Chatter) EndSession(partnerIdentity *PublicKey) error {
 	// TODO: your code here to zeroize remaining state
 
 	return nil
-}
-
-// SendMessage is used to send the given plaintext string as a message.
-// You'll need to implement the code to ratchet, derive keys and encrypt this message.
-func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
-	plaintext string) (*Message, error) {
-
-	if _, exists := c.Sessions[*partnerIdentity]; !exists {
-		return nil, errors.New("Can't send message to partner with no open session")
-	}
-
-	message := &Message{
-		Sender:   &c.Identity.PublicKey,
-		Receiver: partnerIdentity,
-		// TODO: your code here
-	}
-
-	// TODO: your code here
-
-	return message, errors.New("Not implemented")
 }
 
 // ReceiveMessage is used to receive the given message and return the correct
