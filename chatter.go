@@ -94,6 +94,40 @@ type Message struct {
 	IV            []byte
 }
 
+// InitiateHandshake prepares the first message sent in a handshake, containing
+// an ephemeral DH share. The partner which calls this method is the initiator.
+func (c *Chatter) InitiateHandshake(partnerIdentity *PublicKey) (*PublicKey, error) {
+
+	if _, exists := c.Sessions[*partnerIdentity]; exists {
+		return nil, errors.New("Already have session open")
+	}
+
+	pair:=GenerateKeyPair()
+	pair2:=GenerateKeyPair()
+	root:=CombineKeys(DHCombine(partnerIdentity,&pair2.PrivateKey),DHCombine(&pair.PublicKey,&c.Identity.PrivateKey),DHCombine(&pair.PublicKey,&pair2.PrivateKey))
+	// g^A=partnerIdentity
+	// g^a=pair.PublicKey
+	// g^B=c.Identity.PublicKey
+	// g^b=pair2.PublicKey
+
+
+	c.Sessions[*partnerIdentity] = &Session{
+		MyDHRatchet: 	 pair,
+		PartnerDHRatchet: partnerIdentity,
+		RootChain: 		 root,
+		SendChain: 		 root.DeriveKey(CHAIN_LABEL),
+		ReceiveChain: 	 root.DeriveKey(CHAIN_LABEL),
+		CachedReceiveKeys: make(map[int]*SymmetricKey),
+		SendCounter: 	 0,
+		LastUpdate: 	 0,
+		ReceiveCounter:  0,
+	}
+
+	// TODO: your code here
+	return &pair.PublicKey, nil
+
+	// return nil, errors.New("Not implemented")
+}
 // EncodeAdditionalData encodes all of the non-ciphertext fields of a message
 // into a single byte array, suitable for use as additional authenticated data
 // in an AEAD scheme. You should not need to modify this code.
@@ -139,24 +173,6 @@ func (c *Chatter) EndSession(partnerIdentity *PublicKey) error {
 	// TODO: your code here to zeroize remaining state
 
 	return nil
-}
-
-// InitiateHandshake prepares the first message sent in a handshake, containing
-// an ephemeral DH share. The partner which calls this method is the initiator.
-func (c *Chatter) InitiateHandshake(partnerIdentity *PublicKey) (*PublicKey, error) {
-
-	if _, exists := c.Sessions[*partnerIdentity]; exists {
-		return nil, errors.New("Already have session open")
-	}
-
-	c.Sessions[*partnerIdentity] = &Session{
-		CachedReceiveKeys: make(map[int]*SymmetricKey),
-		// TODO: your code here
-	}
-
-	// TODO: your code here
-
-	return nil, errors.New("Not implemented")
 }
 
 // ReturnHandshake prepares the second message sent in a handshake, containing
