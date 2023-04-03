@@ -211,13 +211,7 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 	}
 
 	session:=c.Sessions[*message.Sender]
-
 	session.ReceiveCounter++
-
-	if message.Counter>session.ReceiveCounter {
-		session.CachedReceiveKeys[message.Counter]=session.ReceiveChain.DeriveKey(KEY_LABEL)
-		return "", errors.New("Message out of order")
-	}
 
 	if message.Counter==session.ReceiveCounter {
 		key:=session.ReceiveChain.DeriveKey(KEY_LABEL)
@@ -225,11 +219,27 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 		data:=message.EncodeAdditionalData()
 		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
 		return plaintext, nil
+	} else if message.Counter>session.ReceiveCounter {
+		// early messages
+		for i:=session.ReceiveCounter;i<message.Counter;i++ {
+			session.CachedReceiveKeys[i]=session.ReceiveChain.DeriveKey(KEY_LABEL)
+			session.ReceiveChain=session.ReceiveChain.DeriveKey(CHAIN_LABEL)
+		}
+
+		key:=session.ReceiveChain.DeriveKey(KEY_LABEL)
+		session.ReceiveChain=session.ReceiveChain.DeriveKey(CHAIN_LABEL)
+		data:=message.EncodeAdditionalData()
+		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
+		return plaintext, nil
+		
+	} else {
+		// late messages
+		key:=session.CachedReceiveKeys[message.Counter]
+		data:=message.EncodeAdditionalData()
+		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
+		key.Zeroize()
+		return plaintext, nil
 	}
-
-
-
-	return "", errors.New("Not implemented")
 }
 
 // EncodeAdditionalData encodes all of the non-ciphertext fields of a message
