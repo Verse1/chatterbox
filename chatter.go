@@ -183,9 +183,8 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	c.Sessions[*partnerIdentity].RootChain=CombineKeys(root,DHCombine(c.Sessions[*partnerIdentity].PartnerDHRatchet,&newKeys.PrivateKey))
 	c.Sessions[*partnerIdentity].SendChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
 	c.Sessions[*partnerIdentity].ReceiveChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
+	c.Sessions[*partnerIdentity].LastUpdate=c.Sessions[*partnerIdentity].SendCounter
 	c.Sessions[*partnerIdentity].Change=false
-	c.Sessions[*partnerIdentity].SendCounter=0
-	c.Sessions[*partnerIdentity].ReceiveCounter=0
 	}
 
 	c.Sessions[*partnerIdentity].SendCounter++
@@ -224,40 +223,45 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 		return "", errors.New("Can't receive message from partner with no open session")
 	}
 
-	if !c.Sessions[*message.Sender].Change{
+	c.Sessions[*message.Sender].ReceiveCounter++
+
+	if !c.Sessions[*message.Sender].Change &&  message.Counter==c.Sessions[*message.Sender].ReceiveCounter{
 		root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
 		c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
 		c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
 		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].RootChain.DeriveKey(CHAIN_LABEL)
 		c.Sessions[*message.Sender].Change=true
-		c.Sessions[*message.Sender].ReceiveCounter=0
 	}
 
-	session:=c.Sessions[*message.Sender]
-	session.ReceiveCounter++
-
-	if message.Counter==session.ReceiveCounter {
-		key:=session.ReceiveChain.DeriveKey(KEY_LABEL)
-		session.ReceiveChain=session.ReceiveChain.DeriveKey(CHAIN_LABEL)
+	if message.Counter==c.Sessions[*message.Sender].ReceiveCounter {
+		key:=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(KEY_LABEL)
+		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
 		data:=message.EncodeAdditionalData()
 		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
 		return plaintext, nil
-	} else if message.Counter>session.ReceiveCounter {
+	} else if message.Counter>c.Sessions[*message.Sender].ReceiveCounter {
 		// early messages
-		for i:=session.ReceiveCounter;i<message.Counter;i++ {
-			session.CachedReceiveKeys[i]=session.ReceiveChain.DeriveKey(KEY_LABEL)
-			session.ReceiveChain=session.ReceiveChain.DeriveKey(CHAIN_LABEL)
+		for i:=c.Sessions[*message.Sender].ReceiveCounter;i<message.Counter;i++ {
+			if message.LastUpdate==i {
+				root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
+				c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
+				c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
+				c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].RootChain.DeriveKey(CHAIN_LABEL)
+				c.Sessions[*message.Sender].Change=true
+			}
+			c.Sessions[*message.Sender].CachedReceiveKeys[i]=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(KEY_LABEL)
+			c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
 		}
 
-		key:=session.ReceiveChain.DeriveKey(KEY_LABEL)
-		session.ReceiveChain=session.ReceiveChain.DeriveKey(CHAIN_LABEL)
+		key:=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(KEY_LABEL)
+		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
 		data:=message.EncodeAdditionalData()
 		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
 		return plaintext, nil
 		
 	} else {
 		// late messages
-		key:=session.CachedReceiveKeys[message.Counter]
+		key:=c.Sessions[*message.Sender].CachedReceiveKeys[message.Counter]
 		data:=message.EncodeAdditionalData()
 		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
 		key.Zeroize()
