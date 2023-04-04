@@ -93,6 +93,7 @@ type Message struct {
 	LastUpdate    int
 	Ciphertext    []byte
 	IV            []byte
+	Change		  bool
 }
 
 // InitiateHandshake prepares the first message sent in a handshake, containing
@@ -177,6 +178,7 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	}
 
 	c.Sessions[*partnerIdentity].SendCounter++
+	def:=false
 
 	if c.Sessions[*partnerIdentity].Change{
 	newKeys:=GenerateKeyPair()
@@ -184,9 +186,10 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	root:=c.Sessions[*partnerIdentity].RootChain.DeriveKey(ROOT_LABEL)
 	c.Sessions[*partnerIdentity].RootChain=CombineKeys(root,DHCombine(c.Sessions[*partnerIdentity].PartnerDHRatchet,&newKeys.PrivateKey))
 	c.Sessions[*partnerIdentity].SendChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
-	c.Sessions[*partnerIdentity].ReceiveChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
+	// c.Sessions[*partnerIdentity].ReceiveChain=c.Sessions[*partnerIdentity].RootChain.DeriveKey(CHAIN_LABEL)
 	c.Sessions[*partnerIdentity].LastUpdate=c.Sessions[*partnerIdentity].SendCounter
 	c.Sessions[*partnerIdentity].Change=false
+	def=true
 	}
 
 
@@ -198,14 +201,13 @@ func (c *Chatter) SendMessage(partnerIdentity *PublicKey,
 	c.Sessions[*partnerIdentity].SendChain=chain.DeriveKey(CHAIN_LABEL)
 
 
-
-
 	message := &Message{
 		Sender:   &c.Identity.PublicKey,
 		Receiver: partnerIdentity,
 		Counter: c.Sessions[*partnerIdentity].SendCounter,
 		NextDHRatchet: &c.Sessions[*partnerIdentity].MyDHRatchet.PublicKey,
 		LastUpdate: c.Sessions[*partnerIdentity].LastUpdate,
+		Change: def,
 	}
 
 	data:=message.EncodeAdditionalData()
@@ -224,9 +226,17 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 		return "", errors.New("Can't receive message from partner with no open session")
 	}
 
-	c.Sessions[*message.Sender].ReceiveCounter++
+	counterFail:=c.Sessions[*message.Sender].ReceiveCounter
+	rootFail:=c.Sessions[*message.Sender].RootChain
+	partnerFail:=c.Sessions[*message.Sender].PartnerDHRatchet
+	receiveFail:=c.Sessions[*message.Sender].ReceiveChain
 
-	if !c.Sessions[*message.Sender].Change &&  message.Counter==c.Sessions[*message.Sender].ReceiveCounter{
+
+	if message.Counter>=c.Sessions[*message.Sender].ReceiveCounter{
+		c.Sessions[*message.Sender].ReceiveCounter++
+	}
+
+	if message.Counter==c.Sessions[*message.Sender].ReceiveCounter && message.Change && !c.Sessions[*message.Sender].Change{
 		root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
 		c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
 		c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
@@ -234,16 +244,23 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 		c.Sessions[*message.Sender].Change=true
 	}
 
+	val,err:=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(KEY_LABEL).AuthenticatedDecrypt(message.Ciphertext,message.EncodeAdditionalData(),message.IV)
+	
 	if message.Counter==c.Sessions[*message.Sender].ReceiveCounter {
-		key:=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(KEY_LABEL)
+		if err!=nil{
+			c.Sessions[*message.Sender].RootChain=rootFail
+			c.Sessions[*message.Sender].PartnerDHRatchet=partnerFail
+			c.Sessions[*message.Sender].ReceiveChain=receiveFail
+			c.Sessions[*message.Sender].Change=false
+			c.Sessions[*message.Sender].ReceiveCounter=counterFail
+			return "",err
+		}
 		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
-		data:=message.EncodeAdditionalData()
-		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
-		return plaintext, nil
+		return val,err
 	} else if message.Counter>c.Sessions[*message.Sender].ReceiveCounter {
 		// early messages
 		for i:=c.Sessions[*message.Sender].ReceiveCounter;i<message.Counter;i++ {
-			if message.LastUpdate==i {
+			if message.LastUpdate==i{
 				root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
 				c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
 				c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
@@ -254,19 +271,38 @@ func (c *Chatter) ReceiveMessage(message *Message) (string, error) {
 			c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
 		}
 
+		if message.LastUpdate==message.Counter{
+			root:=c.Sessions[*message.Sender].RootChain.DeriveKey(ROOT_LABEL)
+				c.Sessions[*message.Sender].PartnerDHRatchet=message.NextDHRatchet
+				c.Sessions[*message.Sender].RootChain=CombineKeys(root,DHCombine(message.NextDHRatchet, &c.Sessions[*message.Sender].MyDHRatchet.PrivateKey))
+				c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].RootChain.DeriveKey(CHAIN_LABEL)
+				c.Sessions[*message.Sender].Change=true
+		}
+
 		key:=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(KEY_LABEL)
-		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
 		data:=message.EncodeAdditionalData()
-		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
-		return plaintext, nil
+		val,err:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
+		c.Sessions[*message.Sender].ReceiveCounter=message.Counter
+		c.Sessions[*message.Sender].ReceiveChain=c.Sessions[*message.Sender].ReceiveChain.DeriveKey(CHAIN_LABEL)
+		if err!=nil{
+			c.Sessions[*message.Sender].RootChain=rootFail
+			c.Sessions[*message.Sender].PartnerDHRatchet=partnerFail
+			c.Sessions[*message.Sender].ReceiveChain=receiveFail
+			c.Sessions[*message.Sender].Change=false
+			c.Sessions[*message.Sender].ReceiveCounter=counterFail
+		}
+
+		return val,err
 		
 	} else {
 		// late messages
 		key:=c.Sessions[*message.Sender].CachedReceiveKeys[message.Counter]
 		data:=message.EncodeAdditionalData()
-		plaintext,_:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
+		val,err:=key.AuthenticatedDecrypt(message.Ciphertext,data,message.IV)
+		if err==nil{
 		key.Zeroize()
-		return plaintext, nil
+		}
+		return val,err
 	}
 }
 
